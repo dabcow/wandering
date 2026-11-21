@@ -12,7 +12,7 @@ export async function postJSON<T>(url: string, body: unknown): Promise<T> {
   }
   const data = (await response.json().catch(() => null)) as (T & { error?: string }) | null;
   if (!response.ok || !data) {
-    throw new Error(data?.error || `Request failed (${response.status}).`);
+    throw new Error(data?.error || "Something went wrong. Try again.");
   }
   return data;
 }

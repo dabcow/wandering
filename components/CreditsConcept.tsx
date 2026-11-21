@@ -30,8 +30,8 @@ export function CreditsConcept() {
             <span className="tag">coming soon</span>
           </div>
           <p>
-            Generating an outline will draw from a credit balance you can top up. For now it is
-            free and unmetered.
+            The outline and plot suggestions will draw from a credit balance you can top up. For now
+            they are free and unmetered.
           </p>
           <button type="button" className="btn" disabled>
             Buy credits

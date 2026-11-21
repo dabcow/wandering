@@ -7,6 +7,8 @@ type Props = {
   open: boolean;
   onClose: () => void;
   title: string;
+  /** A roomier dialog, for lists. */
+  wide?: boolean;
   children: ReactNode;
 };
 
@@ -14,7 +16,7 @@ type Props = {
  * Thin wrapper over the native <dialog>, which gives us focus trapping,
  * Escape to close and focus restoration for free.
  */
-export function Dialog({ open, onClose, title, children }: Props) {
+export function Dialog({ open, onClose, title, wide = false, children }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -27,7 +29,7 @@ export function Dialog({ open, onClose, title, children }: Props) {
   return (
     <dialog
       ref={ref}
-      className="dialog"
+      className={wide ? "dialog dialog-wide" : "dialog"}
       aria-label={title}
       onClose={onClose}
       onClick={(event) => {

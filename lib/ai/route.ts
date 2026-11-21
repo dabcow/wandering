@@ -14,14 +14,15 @@ export async function handleAIRoute<S extends z.ZodType>(
   try {
     body = await request.json();
   } catch {
-    return Response.json({ error: "Request body must be JSON." }, { status: 400 });
+    return Response.json({ error: "Something went wrong with that request. Try again." }, { status: 400 });
   }
 
   const parsed = schema.safeParse(body);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
     const where = issue?.path.join(".") || "request";
-    return Response.json({ error: `Invalid ${where}: ${issue?.message ?? "bad input"}` }, { status: 400 });
+    console.error(`[ai] invalid ${where}: ${issue?.message ?? "bad input"}`);
+    return Response.json({ error: "Something went wrong with that request. Try again." }, { status: 400 });
   }
 
   try {
