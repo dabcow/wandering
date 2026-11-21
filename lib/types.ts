@@ -1,3 +1,5 @@
+import type { Mood } from "./moods";
+
 export type Attribute = {
   id: string;
   label: string;
@@ -5,34 +7,39 @@ export type Attribute = {
   value: number;
 };
 
-export type OutlineSection = {
+/** Another take on a cell's paragraph, written by the writer in its rabbit hole. */
+export type Alternate = {
+  id: string;
+  text: string;
+};
+
+/**
+ * One section of the piece. It begins as an outline note (heading + intent);
+ * once the writer clicks it, they write the paragraph and the note stays
+ * beside it as a guide.
+ */
+export type Cell = {
   id: string;
   heading: string;
   intent: string;
-};
-
-export type Outline = {
-  title: string;
-  sections: OutlineSection[];
-};
-
-export type Cell = {
-  id: string;
-  /** Section label shown above the cell. Not exported. */
-  heading: string;
+  mood: Mood;
+  /** False while the cell is still only an outline note. */
+  started: boolean;
+  /** The writer's paragraph. */
   text: string;
-  /** Earlier versions of this cell's text, oldest first. */
-  history: string[];
+  alternates: Alternate[];
 };
 
-export const STEPS = ["idea", "style", "outline", "cells"] as const;
+export const STEPS = ["idea", "style", "outline"] as const;
 export type Step = (typeof STEPS)[number];
 
 export type Project = {
-  version: 1;
+  version: 2;
   step: Step;
   idea: string;
   attributes: Attribute[];
-  outline: Outline | null;
+  /** 0–100: outline length relative to the idea. */
+  length: number;
+  title: string;
   cells: Cell[];
 };

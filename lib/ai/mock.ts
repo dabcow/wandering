@@ -1,49 +1,40 @@
-import { describeAttribute } from "./prompts";
+import { targetSections } from "../length";
+import type { Mood } from "../moods";
 import type { AIProvider } from "./provider";
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+const SECTIONS: { heading: string; intent: string; mood: Mood }[] = [
+  { heading: "Opening", intent: "Draw the reader in and say what this piece is about.", mood: "warm" },
+  { heading: "Background", intent: "Give the context the reader needs.", mood: "calm" },
+  { heading: "The problem", intent: "Name what is not working and why it matters.", mood: "tense" },
+  { heading: "Main point", intent: "Make the central point of the idea.", mood: "bold" },
+  { heading: "An example", intent: "Show the point with one concrete case.", mood: "playful" },
+  { heading: "Looking back", intent: "Reflect on how things got here.", mood: "reflective" },
+  { heading: "What changes", intent: "Describe what will be different.", mood: "hopeful" },
+  { heading: "Close", intent: "Wrap up and leave the reader with a next step.", mood: "joyful" },
+];
+
 /**
  * Canned output for trying the interface without a key (AI_PROVIDER=mock).
- * It makes no attempt to write well; it only exercises the flow.
+ * It makes no attempt to plan well; it only exercises the flow.
  */
 export function createMockProvider(): AIProvider {
-  let round = 0;
-
   return {
     name: "mock",
 
-    async generateOutline(idea) {
+    async generateOutline(idea, _attributes, length) {
       await pause(600);
       const words = idea.trim().split(/\s+/).slice(0, 7).join(" ");
+      const count = targetSections(idea, length);
       return {
         title: `${words.charAt(0).toUpperCase()}${words.slice(1)}`.replace(/[.,;:!?]+$/, ""),
-        sections: [
-          { heading: "Opening", intent: "Draw the reader in and say what this piece is about." },
-          { heading: "Background", intent: "Give the context the reader needs." },
-          { heading: "Main point", intent: "Make the central point of the idea." },
-          { heading: "Close", intent: "Wrap up and leave the reader with a next step." },
-        ],
+        sections: Array.from({ length: count }, (_, i) => {
+          // Always end on the closing section.
+          const section = i === count - 1 ? SECTIONS[SECTIONS.length - 1] : SECTIONS[i % (SECTIONS.length - 1)];
+          return { ...section };
+        }),
       };
-    },
-
-    async generateDrafts(_idea, outline, attributes) {
-      await pause(900);
-      const style = attributes.map((a) => describeAttribute(a)).join("; ");
-      return outline.sections.map(
-        (section, i) =>
-          `Mock paragraph ${i + 1} for "${section.heading}". ${section.intent || "No intent given."} A real provider would write this in the chosen style (${style}).`,
-      );
-    },
-
-    async generateAlternatives(paragraph, _context, _attributes, n) {
-      await pause(700);
-      round += 1;
-      const openers = ["Put another way", "Seen from the other side", "More bluntly", "As a question", "In short"];
-      return Array.from(
-        { length: n },
-        (_, i) => `${openers[i % openers.length]} (mock ${round}.${i + 1}): ${paragraph}`,
-      );
     },
   };
 }

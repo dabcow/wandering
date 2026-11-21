@@ -2,41 +2,54 @@
 
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { Copy, GripVertical, Plus, Rabbit, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeftRight, Copy, GripVertical, PenLine, Plus, Rabbit, Trash2, X } from "lucide-react";
+import type { CSSProperties } from "react";
+import { MOODS, MOOD_IDS, type Mood } from "@/lib/moods";
 import type { Cell as CellData } from "@/lib/types";
 import { AutoTextarea } from "./AutoTextarea";
 
 export type CellHandlers = {
-  onText: (id: string, text: string) => void;
-  onHeading: (id: string, heading: string) => void;
-  onRabbitHole: (id: string) => void;
-  onUndo: (id: string) => void;
+  onStart: (id: string) => void;
+  onPatch: (id: string, patch: Partial<Pick<CellData, "heading" | "intent" | "mood" | "text">>) => void;
+  onToggleHole: (id: string) => void;
+  onAddAlternate: (id: string) => void;
+  onAlternateText: (id: string, alternateId: string, text: string) => void;
+  onSwapAlternate: (id: string, alternateId: string) => void;
+  onDeleteAlternate: (id: string, alternateId: string) => void;
   onDuplicate: (id: string) => void;
   onAddBelow: (id: string) => void;
   onDelete: (id: string) => void;
 };
 
-type Props = CellHandlers & {
+type Props = {
   cell: CellData;
   index: number;
   /** True while this cell's rabbit hole is open. */
-  active: boolean;
+  holeOpen: boolean;
+  /** Id of the cell or alternate whose text box should take focus. */
+  focusTarget: string | null;
+  on: CellHandlers;
 };
 
-export function Cell({ cell, index, active, ...on }: Props) {
+export function Cell({ cell, index, holeOpen, focusTarget, on }: Props) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } =
     useSortable({ id: cell.id });
   const n = index + 1;
+  const versions = cell.alternates.filter((a) => a.text.trim()).length;
 
   return (
     <li
       ref={setNodeRef}
-      className={`cell${isDragging ? " is-dragging" : ""}${active ? " is-active" : ""}`}
-      style={{
-        // Cells only move vertically.
-        transform: CSS.Translate.toString(transform ? { ...transform, x: 0 } : null),
-        transition,
-      }}
+      className={`cell${isDragging ? " is-dragging" : ""}`}
+      data-mood={cell.mood}
+      style={
+        {
+          "--mood": MOODS[cell.mood].color,
+          // Cells only move vertically.
+          transform: CSS.Translate.toString(transform ? { ...transform, x: 0 } : null),
+          transition,
+        } as CSSProperties
+      }
     >
       <div className="cell-gutter">
         <button
@@ -56,32 +69,31 @@ export function Cell({ cell, index, active, ...on }: Props) {
 
       <div className="cell-main">
         <div className="cell-top">
-          <input
-            className="cell-heading"
-            value={cell.heading}
-            placeholder="untitled"
-            aria-label={`Cell ${n} label`}
-            onChange={(event) => on.onHeading(cell.id, event.target.value)}
-          />
-          <div className="cell-tools">
-            <button
-              type="button"
-              className="btn btn-rabbit"
-              onClick={() => on.onRabbitHole(cell.id)}
-              disabled={!cell.text.trim()}
-              title={cell.text.trim() ? undefined : "Write something first"}
+          <label className="mood">
+            <span className="mood-dot" aria-hidden />
+            <select
+              value={cell.mood}
+              aria-label={`Mood of cell ${n}`}
+              onChange={(event) => on.onPatch(cell.id, { mood: event.target.value as Mood })}
             >
-              <Rabbit size={15} aria-hidden /> Rabbit hole
-            </button>
-            {cell.history.length > 0 && (
+              {MOOD_IDS.map((id) => (
+                <option key={id} value={id}>
+                  {MOODS[id].label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div className="cell-tools">
+            {cell.started && (
               <button
                 type="button"
-                className="icon-btn"
-                aria-label={`Undo last swap in cell ${n}`}
-                title="Undo last swap"
-                onClick={() => on.onUndo(cell.id)}
+                className="btn btn-rabbit"
+                aria-expanded={holeOpen}
+                onClick={() => on.onToggleHole(cell.id)}
               >
-                <Undo2 size={15} aria-hidden />
+                <Rabbit size={15} aria-hidden /> Rabbit hole
+                {versions > 0 && <span className="count">{versions}</span>}
               </button>
             )}
             <button
@@ -113,13 +125,101 @@ export function Cell({ cell, index, active, ...on }: Props) {
             </button>
           </div>
         </div>
-        <AutoTextarea
-          className="cell-text prose"
-          value={cell.text}
-          placeholder="Write this paragraph…"
-          aria-label={`Cell ${n} text`}
-          onChange={(event) => on.onText(cell.id, event.target.value)}
-        />
+
+        {cell.started ? (
+          <div className="cell-body">
+            <div className="cell-write">
+              <AutoTextarea
+                className="cell-text prose"
+                value={cell.text}
+                focused={focusTarget === cell.id}
+                placeholder="Write this paragraph…"
+                aria-label={`Cell ${n} paragraph`}
+                onChange={(event) => on.onPatch(cell.id, { text: event.target.value })}
+              />
+
+              {holeOpen && (
+                <div className="hole" role="group" aria-label={`Other versions of cell ${n}`}>
+                  <p className="hole-head">
+                    <Rabbit size={14} aria-hidden /> Other versions
+                    <span>Write another take, then swap it with the one above.</span>
+                  </p>
+                  <ul className="hole-list">
+                    {cell.alternates.map((alternate, i) => (
+                      <li key={alternate.id} className="alt-cell">
+                        <AutoTextarea
+                          className="alt-text prose"
+                          value={alternate.text}
+                          focused={focusTarget === alternate.id}
+                          placeholder="Write another version of this paragraph…"
+                          aria-label={`Other version ${i + 1} of cell ${n}`}
+                          onChange={(event) =>
+                            on.onAlternateText(cell.id, alternate.id, event.target.value)
+                          }
+                        />
+                        <div className="alt-foot">
+                          <span className="gutter">version {i + 2}</span>
+                          <div className="alt-actions">
+                            <button
+                              type="button"
+                              className="btn"
+                              disabled={!alternate.text.trim()}
+                              onClick={() => on.onSwapAlternate(cell.id, alternate.id)}
+                            >
+                              <ArrowLeftRight size={14} aria-hidden /> Swap in
+                            </button>
+                            <button
+                              type="button"
+                              className="icon-btn icon-btn-danger"
+                              aria-label={`Delete other version ${i + 1} of cell ${n}`}
+                              title="Delete this version"
+                              onClick={() => on.onDeleteAlternate(cell.id, alternate.id)}
+                            >
+                              <X size={15} aria-hidden />
+                            </button>
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                  <button
+                    type="button"
+                    className="btn btn-quiet"
+                    onClick={() => on.onAddAlternate(cell.id)}
+                  >
+                    <Plus size={14} aria-hidden /> Another version
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <aside className="cell-note" aria-label={`Outline note for cell ${n}`}>
+              <span className="label">outline note</span>
+              <input
+                className="note-heading"
+                value={cell.heading}
+                placeholder="Section heading"
+                aria-label={`Cell ${n} heading`}
+                onChange={(event) => on.onPatch(cell.id, { heading: event.target.value })}
+              />
+              <AutoTextarea
+                className="note-intent prose"
+                value={cell.intent}
+                placeholder="What should this paragraph do?"
+                aria-label={`Cell ${n} intent`}
+                onChange={(event) => on.onPatch(cell.id, { intent: event.target.value })}
+              />
+            </aside>
+          </div>
+        ) : (
+          <button type="button" className="cell-start" onClick={() => on.onStart(cell.id)}>
+            <span className="cell-start-heading">{cell.heading || "Untitled section"}</span>
+            {cell.intent && <span className="cell-start-intent prose">{cell.intent}</span>}
+            <span className="cell-start-hint">
+              <PenLine size={13} aria-hidden /> Click to write this paragraph
+            </span>
+          </button>
+        )}
       </div>
     </li>
   );

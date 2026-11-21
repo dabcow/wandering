@@ -2,56 +2,63 @@ import type { Attribute } from "../types";
 import { AIError } from "./errors";
 import { createMockProvider } from "./mock";
 import { createOpenAICompatibleProvider } from "./openai-compatible";
-import type { AIOutline, AlternativesContext, OutlineInput, StatusResponse } from "./schemas";
+import type { AIOutline, StatusResponse } from "./schemas";
 
 export type CallOptions = { signal?: AbortSignal };
 
 /** Everything the app needs from a model. Add a provider by implementing this. */
 export interface AIProvider {
   readonly name: string;
-  generateOutline(idea: string, attributes: Attribute[], options?: CallOptions): Promise<AIOutline>;
-  generateDrafts(
+  /** @param length 0–100, how long the outline should be relative to the idea. */
+  generateOutline(
     idea: string,
-    outline: OutlineInput,
     attributes: Attribute[],
+    length: number,
     options?: CallOptions,
-  ): Promise<string[]>;
-  generateAlternatives(
-    paragraph: string,
-    context: AlternativesContext,
-    attributes: Attribute[],
-    n: number,
-    options?: CallOptions & { avoid?: string[] },
-  ): Promise<string[]>;
+  ): Promise<AIOutline>;
 }
 
-const DEFAULT_BASE_URL = "https://api.openai.com/v1";
+/**
+ * Providers that speak the Chat Completions API, with the base URL each uses
+ * unless AI_BASE_URL overrides it.
+ */
+const CHAT_PROVIDERS: Record<string, string> = {
+  openrouter: "https://openrouter.ai/api/v1",
+  "openai-compatible": "https://api.openai.com/v1",
+};
+
+const isChatProvider = (name: string) => Object.hasOwn(CHAT_PROVIDERS, name);
 
 function readEnv() {
+  const provider = (process.env.AI_PROVIDER || "openai-compatible").trim().toLowerCase();
+  const baseUrl =
+    process.env.AI_BASE_URL?.trim() || (isChatProvider(provider) ? CHAT_PROVIDERS[provider] : "");
   return {
-    provider: (process.env.AI_PROVIDER || "openai-compatible").trim().toLowerCase(),
+    provider,
     apiKey: process.env.AI_API_KEY?.trim() || "",
     model: process.env.AI_MODEL?.trim() || "",
-    baseUrl: (process.env.AI_BASE_URL?.trim() || DEFAULT_BASE_URL).replace(/\/+$/, ""),
+    baseUrl: baseUrl.replace(/\/+$/, ""),
   };
 }
 
 export function getProviderStatus(): StatusResponse {
   const env = readEnv();
   if (env.provider === "mock") return { provider: "mock", model: null, configured: true };
+  // Never echo an unrecognised value: a key pasted on the wrong line must not reach the browser.
+  if (!isChatProvider(env.provider)) return { provider: "unknown", model: null, configured: false };
   return {
     provider: env.provider,
     model: env.model || null,
-    configured: env.provider === "openai-compatible" && Boolean(env.apiKey && env.model),
+    configured: Boolean(env.apiKey && env.model),
   };
 }
 
 export function getProvider(): AIProvider {
   const env = readEnv();
   if (env.provider === "mock") return createMockProvider();
-  if (env.provider !== "openai-compatible") {
+  if (!isChatProvider(env.provider)) {
     throw new AIError(
-      `Unknown AI_PROVIDER "${env.provider}". Use "openai-compatible" or "mock".`,
+      'AI_PROVIDER in .env.local is not a known provider. Use "openrouter", "openai-compatible" or "mock".',
       503,
     );
   }

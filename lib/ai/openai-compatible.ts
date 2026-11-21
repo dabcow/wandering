@@ -1,13 +1,8 @@
 import type { z } from "zod";
-import {
-  buildAlternativesPrompt,
-  buildDraftPrompt,
-  buildOutlinePrompt,
-  type Prompt,
-} from "./prompts";
 import { AIError } from "./errors";
+import { buildOutlinePrompt, type Prompt } from "./prompts";
 import type { AIProvider } from "./provider";
-import { aiAlternativesSchema, aiDraftSchema, aiOutlineSchema } from "./schemas";
+import { aiOutlineSchema } from "./schemas";
 
 type Config = { apiKey: string; model: string; baseUrl: string };
 
@@ -103,13 +98,12 @@ export function createOpenAICompatibleProvider(config: Config): AIProvider {
     prompt: Prompt,
     schema: S,
     signal?: AbortSignal,
-    check?: (value: z.infer<S>) => boolean,
   ): Promise<z.infer<S>> {
     for (let attempt = 0; attempt < 2; attempt++) {
       const content = await chat(prompt, signal);
       try {
         const parsed = schema.safeParse(extractJSON(content));
-        if (parsed.success && (!check || check(parsed.data))) return parsed.data;
+        if (parsed.success) return parsed.data;
       } catch {
         // Unparseable reply; retry below.
       }
@@ -120,27 +114,12 @@ export function createOpenAICompatibleProvider(config: Config): AIProvider {
   return {
     name: "openai-compatible",
 
-    generateOutline(idea, attributes, options) {
-      return completeJSON(buildOutlinePrompt(idea, attributes), aiOutlineSchema, options?.signal);
-    },
-
-    async generateDrafts(idea, outline, attributes, options) {
-      const result = await completeJSON(
-        buildDraftPrompt(idea, outline, attributes),
-        aiDraftSchema,
-        options?.signal,
-        (value) => value.paragraphs.length === outline.sections.length,
-      );
-      return result.paragraphs;
-    },
-
-    async generateAlternatives(paragraph, context, attributes, n, options) {
-      const result = await completeJSON(
-        buildAlternativesPrompt(paragraph, context, attributes, n, options?.avoid),
-        aiAlternativesSchema,
+    generateOutline(idea, attributes, length, options) {
+      return completeJSON(
+        buildOutlinePrompt(idea, attributes, length),
+        aiOutlineSchema,
         options?.signal,
       );
-      return result.alternatives.slice(0, n);
     },
   };
 }

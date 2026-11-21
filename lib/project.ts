@@ -2,11 +2,9 @@
 
 import { useEffect, useReducer, useState } from "react";
 import { clampValue, defaultAttributes } from "./attributes";
+import { DEFAULT_LENGTH } from "./length";
 import { emptyProject, loadProject, saveProject } from "./storage";
-import type { Cell, Outline, OutlineSection, Project, Step } from "./types";
-
-/** Cap on how many earlier versions a cell remembers. */
-const MAX_HISTORY = 20;
+import type { Alternate, Cell, Project, Step } from "./types";
 
 export function newId(): string {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -15,38 +13,48 @@ export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+export function blankCell(): Cell {
+  return {
+    id: newId(),
+    heading: "",
+    intent: "",
+    mood: "neutral",
+    started: true,
+    text: "",
+    alternates: [],
+  };
+}
+
 export type Action =
   | { type: "hydrate"; project: Project }
   | { type: "reset" }
   | { type: "setStep"; step: Step }
   | { type: "setIdea"; idea: string }
   | { type: "setAttribute"; id: string; value: number }
-  | { type: "resetAttributes" }
-  | { type: "setOutline"; outline: Outline }
+  | { type: "setLength"; length: number }
+  /** Put the pentagon and the length back to their defaults. */
+  | { type: "resetStyle" }
+  /** Replace the whole outline, as after generating one. */
+  | { type: "setOutline"; title: string; cells: Cell[] }
   | { type: "setTitle"; title: string }
-  | { type: "updateSection"; id: string; patch: Partial<Omit<OutlineSection, "id">> }
-  | { type: "addSection"; section: OutlineSection }
-  | { type: "removeSection"; id: string }
-  | { type: "moveSection"; id: string; direction: -1 | 1 }
-  | { type: "setCells"; cells: Cell[] }
-  | { type: "updateCell"; id: string; patch: Partial<Pick<Cell, "text" | "heading">> }
+  | {
+      type: "updateCell";
+      id: string;
+      patch: Partial<Pick<Cell, "heading" | "intent" | "mood" | "started" | "text">>;
+    }
   | { type: "insertCell"; cell: Cell; afterId: string | null }
   | { type: "deleteCell"; id: string }
   | { type: "moveCell"; activeId: string; overId: string }
-  /** Replace a cell's text, keeping the old text in its history. */
-  | { type: "swapCellText"; id: string; text: string }
-  /** Step back to the most recent history entry. */
-  | { type: "undoCell"; id: string }
-  /** Bring back a specific history entry; the current text takes its place in history. */
-  | { type: "restoreCell"; id: string; index: number };
+  | { type: "addAlternate"; cellId: string; alternate: Alternate }
+  | { type: "updateAlternate"; cellId: string; alternateId: string; text: string }
+  | { type: "deleteAlternate"; cellId: string; alternateId: string }
+  /** Interchange the cell's paragraph with one of its alternates. */
+  | { type: "swapAlternate"; cellId: string; alternateId: string }
+  /** Drop alternates left empty, as when a rabbit hole closes. */
+  | { type: "pruneAlternates"; cellId: string };
 
 function mapCell(project: Project, id: string, fn: (cell: Cell) => Cell): Project {
   return { ...project, cells: project.cells.map((c) => (c.id === id ? fn(c) : c)) };
-}
-
-function mapSections(project: Project, fn: (sections: OutlineSection[]) => OutlineSection[]): Project {
-  if (!project.outline) return project;
-  return { ...project, outline: { ...project.outline, sections: fn(project.outline.sections) } };
 }
 
 function move<T>(items: T[], from: number, to: number): T[] {
@@ -74,30 +82,14 @@ export function reducer(project: Project, action: Action): Project {
           a.id === action.id ? { ...a, value: clampValue(action.value) } : a,
         ),
       };
-    case "resetAttributes":
-      return { ...project, attributes: defaultAttributes() };
+    case "setLength":
+      return { ...project, length: clampValue(action.length) };
+    case "resetStyle":
+      return { ...project, attributes: defaultAttributes(), length: DEFAULT_LENGTH };
     case "setOutline":
-      return { ...project, outline: action.outline };
+      return { ...project, title: action.title, cells: action.cells };
     case "setTitle":
-      return {
-        ...project,
-        outline: { sections: [], ...project.outline, title: action.title },
-      };
-    case "updateSection":
-      return mapSections(project, (sections) =>
-        sections.map((s) => (s.id === action.id ? { ...s, ...action.patch } : s)),
-      );
-    case "addSection":
-      return mapSections(project, (sections) => [...sections, action.section]);
-    case "removeSection":
-      return mapSections(project, (sections) => sections.filter((s) => s.id !== action.id));
-    case "moveSection":
-      return mapSections(project, (sections) => {
-        const from = sections.findIndex((s) => s.id === action.id);
-        return move(sections, from, from + action.direction);
-      });
-    case "setCells":
-      return { ...project, cells: action.cells };
+      return { ...project, title: action.title };
     case "updateCell":
       return mapCell(project, action.id, (c) => ({ ...c, ...action.patch }));
     case "insertCell": {
@@ -113,25 +105,39 @@ export function reducer(project: Project, action: Action): Project {
       const to = project.cells.findIndex((c) => c.id === action.overId);
       return { ...project, cells: move(project.cells, from, to) };
     }
-    case "swapCellText":
-      return mapCell(project, action.id, (c) =>
-        c.text === action.text
-          ? c
-          : { ...c, text: action.text, history: [...c.history, c.text].slice(-MAX_HISTORY) },
-      );
-    case "undoCell":
-      return mapCell(project, action.id, (c) =>
-        c.history.length === 0
-          ? c
-          : { ...c, text: c.history[c.history.length - 1], history: c.history.slice(0, -1) },
-      );
-    case "restoreCell":
-      return mapCell(project, action.id, (c) => {
-        const restored = c.history[action.index];
-        if (restored === undefined) return c;
-        const history = c.history.filter((_, i) => i !== action.index);
-        return { ...c, text: restored, history: [...history, c.text].slice(-MAX_HISTORY) };
+    case "addAlternate":
+      return mapCell(project, action.cellId, (c) => ({
+        ...c,
+        alternates: [...c.alternates, action.alternate],
+      }));
+    case "updateAlternate":
+      return mapCell(project, action.cellId, (c) => ({
+        ...c,
+        alternates: c.alternates.map((a) =>
+          a.id === action.alternateId ? { ...a, text: action.text } : a,
+        ),
+      }));
+    case "deleteAlternate":
+      return mapCell(project, action.cellId, (c) => ({
+        ...c,
+        alternates: c.alternates.filter((a) => a.id !== action.alternateId),
+      }));
+    case "swapAlternate":
+      return mapCell(project, action.cellId, (c) => {
+        const chosen = c.alternates.find((a) => a.id === action.alternateId);
+        if (!chosen) return c;
+        return {
+          ...c,
+          text: chosen.text,
+          alternates: c.alternates.map((a) => (a.id === chosen.id ? { ...a, text: c.text } : a)),
+        };
       });
+    case "pruneAlternates":
+      return mapCell(project, action.cellId, (c) =>
+        c.alternates.every((a) => a.text.trim())
+          ? c
+          : { ...c, alternates: c.alternates.filter((a) => a.text.trim()) },
+      );
   }
 }
 

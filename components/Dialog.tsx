@@ -7,8 +7,6 @@ type Props = {
   open: boolean;
   onClose: () => void;
   title: string;
-  /** "modal" is centred; "drawer" slides in from the right. */
-  variant?: "modal" | "drawer";
   children: ReactNode;
 };
 
@@ -16,7 +14,7 @@ type Props = {
  * Thin wrapper over the native <dialog>, which gives us focus trapping,
  * Escape to close and focus restoration for free.
  */
-export function Dialog({ open, onClose, title, variant = "modal", children }: Props) {
+export function Dialog({ open, onClose, title, children }: Props) {
   const ref = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -29,7 +27,7 @@ export function Dialog({ open, onClose, title, variant = "modal", children }: Pr
   return (
     <dialog
       ref={ref}
-      className={`dialog dialog-${variant}`}
+      className="dialog"
       aria-label={title}
       onClose={onClose}
       onClick={(event) => {
