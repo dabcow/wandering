@@ -1,8 +1,8 @@
 "use client";
 
-import { Check, Link2, Trash2, X } from "lucide-react";
+import { Check, CornerDownRight, Link2, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import { isLeaf } from "@/lib/tree";
+import { isLeaf, moveProblem } from "@/lib/tree";
 import type { Link, PlotNode } from "@/lib/types";
 import { AutoTextarea } from "./AutoTextarea";
 
@@ -15,13 +15,19 @@ type Props = {
   onPrune: () => void;
   onAddLink: (otherId: string) => void;
   onRemoveLink: (otherId: string) => void;
+  /** Move this plot point, with everything after it, to follow another (null: the start of its plot). */
+  onMove: (parentId: string | null) => void;
   onDone: () => void;
 };
+
+/** The select's value for "the start of the plot", which has no plot point id. */
+const START = "__start__";
 
 /** Edit the plot point in view, in place on its card: its text, ending, where it meets the other plot, or delete it. */
 export function PlotPointEditor(props: Props) {
   const { node, nodes, links, hasB } = props;
   const [linkTarget, setLinkTarget] = useState("");
+  const [moveTarget, setMoveTarget] = useState("");
 
   const leaf = isLeaf(nodes, node.id);
   const otherPlot = node.plot === "main" ? "b" : "main";
@@ -31,6 +37,9 @@ export function PlotPointEditor(props: Props) {
     .map((l) => (node.plot === "main" ? l.bId : l.mainId));
   const linked = nodes.filter((n) => linkedIds.includes(n.id));
   const linkable = nodes.filter((n) => n.plot === otherPlot && !linkedIds.includes(n.id));
+  // Where this plot point could move to: the same choices as dragging it in the story map.
+  const movable = nodes.filter((n) => n.plot === node.plot && moveProblem(nodes, node.id, n.id) === null);
+  const canMoveToStart = moveProblem(nodes, node.id, null) === null;
 
   return (
     <div className="card-editor">
@@ -116,6 +125,40 @@ export function PlotPointEditor(props: Props) {
               </button>
             </div>
           )}
+        </div>
+      )}
+
+      {(movable.length > 0 || canMoveToStart) && (
+        <div className="inspector-links">
+          <p className="label">
+            <CornerDownRight size={12} aria-hidden /> Move it, with everything after it
+          </p>
+          <div className="link-add">
+            <select
+              value={moveTarget}
+              aria-label="Plot point it should follow"
+              onChange={(event) => setMoveTarget(event.target.value)}
+            >
+              <option value="">Follow another plot point…</option>
+              {canMoveToStart && <option value={START}>The start of the {node.plot === "b" ? "subplot" : "story"}</option>}
+              {movable.map((other) => (
+                <option key={other.id} value={other.id}>
+                  Beat {other.level} · {other.title}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn"
+              disabled={!moveTarget}
+              onClick={() => {
+                props.onMove(moveTarget === START ? null : moveTarget);
+                setMoveTarget("");
+              }}
+            >
+              Move
+            </button>
+          </div>
         </div>
       )}
 

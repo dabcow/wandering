@@ -317,7 +317,8 @@ export function PlotPointView(props: Props) {
                   title={child.title}
                   summary={child.summary}
                   isEnding={child.isEnding}
-                  yours
+                  // Written by the writer, or an AI suggestion moved here from elsewhere in the tree.
+                  yours={child.source === "user"}
                   chosen
                   full={full}
                   onGo={() => props.onFocus(child.id)}

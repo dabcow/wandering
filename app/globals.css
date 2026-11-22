@@ -2671,3 +2671,60 @@ html:has(dialog[open]) {
   gap: 2px;
   padding: 6px 0 2px;
 }
+
+/* ---------- Moving plot points in the story map ---------- */
+
+/* A long press shouldn't select text or open the touch callout. */
+.tree-scroll.can-move .node-card {
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.tree-scroll.is-dragging,
+.tree-scroll.is-dragging .node-card {
+  cursor: grabbing;
+}
+
+/* The plot point in hand, and everything that moves with it. */
+.node-card.is-lifted {
+  opacity: 0.35;
+}
+
+.node-card.is-drop-ok {
+  outline: 2px dashed var(--accent);
+  outline-offset: 3px;
+}
+
+.node-card.is-drop-no {
+  outline: 2px dashed var(--danger);
+  outline-offset: 3px;
+}
+
+.drag-ghost {
+  position: fixed;
+  z-index: 1000;
+  display: grid;
+  gap: 2px;
+  max-width: 260px;
+  padding: 8px 12px;
+  border: 1.5px solid var(--accent);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: 0 14px 28px -14px rgba(73, 52, 140, 0.6);
+  font-size: 13px;
+  pointer-events: none;
+  transform: rotate(-2deg);
+}
+
+.drag-ghost small {
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+.drag-ghost.is-no {
+  border-color: var(--danger);
+}
+
+.drag-ghost.is-no small {
+  color: var(--danger);
+}

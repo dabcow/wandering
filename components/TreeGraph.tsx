@@ -1,9 +1,11 @@
 "use client";
 
 import { Crown, PenLine } from "lucide-react";
-import { useEffect, useRef } from "react";
-import { layoutTree, maxLevel } from "@/lib/tree";
+import { useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
+import { layoutTree, maxLevel, subtreeIds } from "@/lib/tree";
 import type { Beat, Link, Plot, PlotNode } from "@/lib/types";
+import { useHoldToDrag } from "./useHoldToDrag";
 
 type Props = {
   nodes: PlotNode[];
@@ -28,6 +30,13 @@ type Props = {
    * and the subplot in a lane to the right. Otherwise beats are columns, left to right.
    */
   vertical?: boolean;
+  /**
+   * Hold a plot point and drag it onto another to move it (with everything after it) to
+   * follow that one. Without this the map is only for looking and clicking.
+   */
+  onMove?: (id: string, parentId: string) => void;
+  /** Why a plot point can't move to follow another, or null if it can. Required with onMove. */
+  moveProblem?: (id: string, parentId: string) => string | null;
 };
 
 const FULL = { cardW: 188, cardH: 68, colW: 232, rowH: 84, laneGap: 52, head: 78, headRow: 54, pad: 16 };
@@ -58,6 +67,8 @@ export function TreeGraph({
   status,
   activeLevel,
   vertical = false,
+  onMove,
+  moveProblem,
 }: Props) {
   const size = compact ? COMPACT : FULL;
   const v = compact ? VERTICAL_COMPACT : VERTICAL;
@@ -157,6 +168,18 @@ export function TreeGraph({
 
   // Scroll the drawing, not the page, so the plot point in view stays visible.
   const scroller = useRef<HTMLDivElement>(null);
+
+  // Hold and drag a plot point onto another to move it there.
+  const { drag, onPointerDown, onClickCapture, onContextMenu } = useHoldToDrag({
+    enabled: Boolean(onMove),
+    scroller,
+    problem: (id, targetId) => moveProblem?.(id, targetId) ?? null,
+    onDrop: (id, targetId) => onMove?.(id, targetId),
+  });
+  const dragId = drag?.id;
+  // The plot point being dragged moves with everything after it, so all of them fade while it does.
+  const lifted = useMemo(() => new Set(dragId ? subtreeIds(nodes, dragId) : []), [nodes, dragId]);
+  const titleOf = (id: string | null | undefined) => nodes.find((n) => n.id === id)?.title ?? "";
   const top = topId ? placed.get(topId) : undefined;
   const topX = top?.x;
   const topY = top?.y;
@@ -184,7 +207,7 @@ export function TreeGraph({
   return (
     <div
       ref={scroller}
-      className={`tree-scroll${compact ? " is-compact" : ""}${vertical ? " is-vertical" : ""}`}
+      className={`tree-scroll${compact ? " is-compact" : ""}${vertical ? " is-vertical" : ""}${drag ? " is-dragging" : ""}${onMove ? " can-move" : ""}`}
     >
       <div className="tree-canvas" style={{ width, height }}>
         {vertical ? (
@@ -330,6 +353,8 @@ export function TreeGraph({
             node.id === topId ? "is-top" : "",
             node.isEnding ? "is-ending" : "",
             onPath(node.id) ? "" : "is-dim",
+            lifted.has(node.id) ? "is-lifted" : "",
+            drag?.overId === node.id ? (drag.problem ? "is-drop-no" : "is-drop-ok") : "",
           ];
           const state = !status ? "" : anchor?.hasText ? ", written" : ", not written yet";
           return (
@@ -341,6 +366,10 @@ export function TreeGraph({
               aria-pressed={node.id === selectedId}
               aria-label={`${node.plot === "b" ? "Subplot" : "Main plot"}, beat ${node.level}: ${node.title}${node.isEnding ? ", ending" : ""}${node.id === topId ? ", in view" : ""}${state}`}
               title={node.summary}
+              data-node-id={node.id}
+              onPointerDown={(event) => onPointerDown(node.id, event)}
+              onClickCapture={onClickCapture}
+              onContextMenu={onContextMenu}
               onClick={() => onSelect(node)}
             >
               <span className="node-title">{node.title}</span>
@@ -366,6 +395,24 @@ export function TreeGraph({
           );
         })}
       </div>
+
+      {/* The plot point in hand follows the pointer, saying where it would go. */}
+      {drag &&
+        createPortal(
+          <div
+            className={`drag-ghost${drag.overId && drag.problem ? " is-no" : ""}`}
+            style={{ left: drag.x + 14, top: drag.y + 14 }}
+            aria-hidden
+          >
+            <strong>{titleOf(drag.id)}</strong>
+            <small>
+              {!drag.overId
+                ? "Drop it on the plot point it should follow"
+                : (drag.problem ?? `Will follow “${titleOf(drag.overId)}”`)}
+            </small>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

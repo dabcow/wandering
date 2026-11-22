@@ -3,7 +3,7 @@
 import type { JSONContent } from "@tiptap/core";
 import { useEffect, useReducer, useState } from "react";
 import { emptyProject, loadProject, saveProject } from "./storage";
-import { branchFor, groupKey, subtreeIds } from "./tree";
+import { branchFor, groupKey, moveSubtree, subtreeIds } from "./tree";
 import type { Beat, Candidate, Link, Plot, PlotNode, Project, Step } from "./types";
 
 export { newId } from "./id";
@@ -30,6 +30,8 @@ export type Action =
   | { type: "updateNode"; id: string; patch: Partial<Pick<PlotNode, "title" | "summary" | "isEnding">> }
   /** Delete a node and everything below it. */
   | { type: "pruneNode"; id: string }
+  /** Move a node, and everything below it, to follow another node (or to the start of its plot). */
+  | { type: "moveNode"; id: string; parentId: string | null }
   | { type: "startBPlot"; premise: string }
   | { type: "setBPremise"; premise: string }
   /** Remove the B plot with its nodes, suggestions and links. */
@@ -131,6 +133,16 @@ export function reducer(project: Project, action: Action): Project {
         ...project,
         nodes: project.nodes.map((n) => (n.id === action.id ? { ...n, ...action.patch } : n)),
       };
+    case "moveNode": {
+      const node = project.nodes.find((n) => n.id === action.id);
+      if (!node || node.parentId === action.parentId) return project;
+      // It was chosen from its old parent's suggestions; take it out of them so it isn't offered there again.
+      const from = groupKey(node.plot, node.parentId);
+      const candidates = project.candidates[from]
+        ? { ...project.candidates, [from]: project.candidates[from].filter((c) => c.id !== node.id) }
+        : project.candidates;
+      return { ...project, nodes: moveSubtree(project.nodes, action.id, action.parentId), candidates };
+    }
     case "pruneNode":
       return withoutNodes(project, new Set(subtreeIds(project.nodes, action.id)));
     case "startBPlot":

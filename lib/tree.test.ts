@@ -8,6 +8,8 @@ import {
   firstLeafUnder,
   layoutTree,
   leavesOf,
+  moveProblem,
+  moveSubtree,
   pathTo,
   subtreeIds,
 } from "./tree.ts";
@@ -143,4 +145,45 @@ test("with no anchors on its path, an anchor goes at the end", () => {
   assert.equal(anchorInsertIndex(["x1", "b3"], ["a1", "a2"], "a2"), 2);
   // A node that is not on the given path also falls back to the end.
   assert.equal(anchorInsertIndex(["a1"], ["a1", "a2"], "zz"), 1);
+});
+
+test("moving a plot point takes everything after it along and shifts their beats", () => {
+  // a1 ─ a2 ─ a3, and b2 also follows a1
+  const nodes = [
+    { ...node("a1", null, 1) },
+    { ...node("a2", "a1", 2) },
+    { ...node("a3", "a2", 3) },
+    { ...node("b2", "a1", 2) },
+  ];
+  const moved = moveSubtree(nodes, "a2", "b2");
+  const at = (id: string) => moved.find((n) => n.id === id);
+  assert.equal(at("a2")?.parentId, "b2");
+  assert.equal(at("a2")?.level, 3);
+  assert.equal(at("a3")?.level, 4);
+  assert.equal(at("b2")?.level, 2);
+  // To the start of the plot.
+  const toStart = moveSubtree(nodes, "a2", null);
+  assert.equal(toStart.find((n) => n.id === "a2")?.level, 1);
+  assert.equal(toStart.find((n) => n.id === "a3")?.level, 2);
+});
+
+test("a plot point can't move under itself, an ending, the other plot, or a full parent", () => {
+  const nodes = [
+    node("a1", null, 1),
+    node("a2", "a1", 2),
+    node("a3", "a2", 3),
+    { ...node("end", "a1", 2), isEnding: true },
+    node("b1", null, 1, "b"),
+    node("x", null, 1),
+  ];
+  assert.equal(moveProblem(nodes, "a2", "a1"), "It's already there.");
+  assert.match(moveProblem(nodes, "a2", "a3") ?? "", /itself/);
+  assert.match(moveProblem(nodes, "a2", "a2") ?? "", /itself/);
+  assert.match(moveProblem(nodes, "a3", "end") ?? "", /ending/);
+  assert.match(moveProblem(nodes, "a3", "b1") ?? "", /own plot/);
+  assert.equal(moveProblem(nodes, "a3", "x"), null);
+  assert.equal(moveProblem(nodes, "a2", null), null);
+  // a1 already has a2 and end; a third is fine, a fourth is not.
+  const full = [...nodes, node("c2", "a1", 2)];
+  assert.match(moveProblem(full, "a3", "a1") ?? "", /already has 3/);
 });

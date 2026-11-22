@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight, Spade } from "lucide-react";
 import { useEffect, useRef, useState, type Dispatch } from "react";
 import { newId, type Action } from "@/lib/project";
-import { branchFor, childrenOf, leavesOf, pathTo, subtreeIds } from "@/lib/tree";
+import { branchFor, childrenOf, leavesOf, moveProblem, pathTo, subtreeIds } from "@/lib/tree";
 import type { Candidate, Plot, PlotNode, Project } from "@/lib/types";
 import type { StoryAI } from "@/lib/useStoryAI";
 import { BPlotPanel } from "./BPlotPanel";
@@ -183,6 +183,7 @@ export function TreeStep({ project, dispatch, ai, onBack, onWrite }: Props) {
                   onPrune={() => prune(selected.id)}
                   onAddLink={(otherId) => dispatch({ type: "addLink", link: link(otherId) })}
                   onRemoveLink={(otherId) => dispatch({ type: "removeLink", link: link(otherId) })}
+                  onMove={(parentId) => dispatch({ type: "moveNode", id: selected.id, parentId })}
                   onDone={() => setSelectedId(null)}
                 />
               ) : undefined
@@ -199,7 +200,7 @@ export function TreeStep({ project, dispatch, ai, onBack, onWrite }: Props) {
               <p className="tree-stats">
                 {nodes.length === 0
                   ? "No plot points yet."
-                  : `${nodes.length} plot point${nodes.length === 1 ? "" : "s"} · ${leaves.length} branch${leaves.length === 1 ? "" : "es"} · ${ended} ended. Click one to go there.`}
+                  : `${nodes.length} plot point${nodes.length === 1 ? "" : "s"} · ${leaves.length} branch${leaves.length === 1 ? "" : "es"} · ${ended} ended. Click one to go there, or hold and drag it onto another to move it.`}
               </p>
             </div>
             <button type="button" className="btn" aria-expanded={bPanelOpen} onClick={() => setBPanelOpen(!bPanelOpen)}>
@@ -229,6 +230,8 @@ export function TreeStep({ project, dispatch, ai, onBack, onWrite }: Props) {
             highlight={inView}
             activeLevel={(focusNode?.level ?? 0) + 1}
             vertical
+            onMove={(id, parentId) => dispatch({ type: "moveNode", id, parentId })}
+            moveProblem={(id, parentId) => moveProblem(nodes, id, parentId)}
             onSelect={(node) => {
               focusOn(node.plot, node.id);
               showPicker();

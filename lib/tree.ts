@@ -92,6 +92,64 @@ export function firstLeafUnder(nodes: PlotNode[], id: string): PlotNode | null {
   return null;
 }
 
+/* ---------- Moving a plot point ---------- */
+
+/**
+ * Why a plot point can't be moved to follow another one (or to the start of
+ * its plot, with a null parent), or null if it can. It moves together with
+ * everything that follows it, and the per-parent and per-beat limits still hold.
+ */
+export function moveProblem(nodes: PlotNode[], id: string, parentId: string | null): string | null {
+  const node = nodes.find((n) => n.id === id);
+  if (!node) return "That plot point no longer exists.";
+  if (node.parentId === parentId) return "It's already there.";
+  const moving = new Set(subtreeIds(nodes, id));
+  const parent = parentId ? nodes.find((n) => n.id === parentId) : null;
+  if (parentId && !parent) return "That plot point no longer exists.";
+  if (parent) {
+    if (moving.has(parent.id)) return "A plot point can't go under itself or anything that follows it.";
+    if (parent.plot !== node.plot) return "Plot points can only move within their own plot.";
+    if (parent.isEnding) return `"${parent.title}" is an ending. Edit it to un-mark it first.`;
+  }
+  const siblings = childrenOf(nodes, node.plot, parentId).filter((n) => n.id !== id);
+  if (siblings.length >= MAX_CHOICES_PER_PARENT) {
+    return parent
+      ? `"${parent.title}" already has ${MAX_CHOICES_PER_PARENT} plot points after it.`
+      : `The story already has ${MAX_CHOICES_PER_PARENT} ways to begin.`;
+  }
+  // Every beat the moved branch would land in must stay within its limit.
+  const shift = (parent ? parent.level + 1 : 1) - node.level;
+  const perLevel = new Map<number, number>();
+  for (const n of nodes) {
+    if (n.plot !== node.plot) continue;
+    const level = moving.has(n.id) ? n.level + shift : n.level;
+    perLevel.set(level, (perLevel.get(level) ?? 0) + 1);
+  }
+  for (const [level, count] of perLevel) {
+    if (count > MAX_NODES_PER_LEVEL && (nodesAtLevel(nodes, node.plot, level).length < count)) {
+      return `Beat ${level} would have more than ${MAX_NODES_PER_LEVEL} plot points.`;
+    }
+  }
+  return null;
+}
+
+/**
+ * The tree with a plot point (and everything after it) moved to follow
+ * another one, or to the start of its plot. Levels are shifted to match.
+ * Check moveProblem first; this does not.
+ */
+export function moveSubtree(nodes: PlotNode[], id: string, parentId: string | null): PlotNode[] {
+  const node = nodes.find((n) => n.id === id);
+  if (!node) return nodes;
+  const parent = parentId ? nodes.find((n) => n.id === parentId) : null;
+  const shift = (parent ? parent.level + 1 : 1) - node.level;
+  const moving = new Set(subtreeIds(nodes, id));
+  return nodes.map((n) => {
+    if (n.id === id) return { ...n, parentId, level: n.level + shift };
+    return moving.has(n.id) ? { ...n, level: n.level + shift } : n;
+  });
+}
+
 /* ---------- Layout ---------- */
 
 /**
