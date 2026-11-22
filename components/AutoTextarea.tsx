@@ -2,10 +2,14 @@
 
 import { useEffect, useLayoutEffect, useRef, type TextareaHTMLAttributes } from "react";
 
-type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value"> & { value: string };
+type Props = Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, "value"> & {
+  value: string;
+  /** Takes keyboard focus when this turns true. */
+  focused?: boolean;
+};
 
 /** A textarea that grows to fit its content, like a notebook cell. */
-export function AutoTextarea({ value, ...rest }: Props) {
+export function AutoTextarea({ value, focused = false, ...rest }: Props) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const resize = () => {
@@ -16,6 +20,10 @@ export function AutoTextarea({ value, ...rest }: Props) {
   };
 
   useLayoutEffect(resize, [value]);
+
+  useEffect(() => {
+    if (focused) ref.current?.focus();
+  }, [focused]);
 
   useEffect(() => {
     // Wrapping changes with width, and web fonts change it once loaded.

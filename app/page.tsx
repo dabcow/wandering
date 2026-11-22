@@ -1,457 +1,337 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, FilePlus2, Plus, RotateCw } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { CellList } from "@/components/CellList";
-import { CreditsConcept } from "@/components/CreditsConcept";
-import { ExportButton } from "@/components/ExportButton";
+import { ArrowRight, PenLine, Rabbit, RotateCw, Sparkles } from "lucide-react";
+import { useEffect, useState } from "react";
+import { AccountConcept } from "@/components/AccountConcept";
+import { GuideRail } from "@/components/GuideRail";
 import { IdeaInput } from "@/components/IdeaInput";
-import { OutlineEditor } from "@/components/OutlineEditor";
-import { RabbitHolePanel, type RabbitState } from "@/components/RabbitHolePanel";
+import { PacingSlider } from "@/components/PacingSlider";
+import { ProjectMenu } from "@/components/ProjectMenu";
+import { ReviewStep } from "@/components/ReviewStep";
 import { ErrorNotice, Loading } from "@/components/Status";
 import { Stepper } from "@/components/Stepper";
-import { StylePanel } from "@/components/StylePanel";
 import { Toast, useToast } from "@/components/Toast";
-import type {
-  AlternativesResponse,
-  DraftResponse,
-  OutlineResponse,
-  StatusResponse,
-} from "@/lib/ai/schemas";
-import { errorMessage, postJSON } from "@/lib/api";
-import { newId, useProject } from "@/lib/project";
-import type { Step } from "@/lib/types";
-
-type Request = { status: "idle" | "loading" | "error"; error?: string };
-const IDLE: Request = { status: "idle" };
-const RABBIT_IDLE: RabbitState = { status: "idle", alternatives: [] };
-const ALTERNATIVES_PER_ROUND = 4;
+import { TreeStep } from "@/components/TreeStep";
+import { WriteStep } from "@/components/WriteStep";
+import type { StatusResponse } from "@/lib/ai/schemas";
+import { useProject } from "@/lib/project";
+import { deleteProject, emptyProject, hasWork, parseProject } from "@/lib/storage";
+import type { Project, Step } from "@/lib/types";
+import { useStoryAI } from "@/lib/useStoryAI";
 
 export default function Home() {
   const { project, dispatch, hydrated, saveFailed } = useProject();
   const { toast, show } = useToast();
-
-  const [ai, setAi] = useState<StatusResponse | null>(null);
-  const [outlineReq, setOutlineReq] = useState<Request>(IDLE);
-  const [draftReq, setDraftReq] = useState<Request>(IDLE);
-  const [rabbitCellId, setRabbitCellId] = useState<string | null>(null);
-  const [rabbit, setRabbit] = useState<RabbitState>(RABBIT_IDLE);
-  // Each kind of request keeps a counter so a slow, superseded reply is ignored.
-  const latest = useRef({ outline: 0, draft: 0, rabbit: 0 });
+  const ai = useStoryAI(project, dispatch);
+  const [status, setStatus] = useState<StatusResponse | null>(null);
+  /** Bumped when a different story is opened, so every step starts fresh with it. */
+  const [storyKey, setStoryKey] = useState(0);
+  /** The writer chose Suggest in step 1: show the pacing and the AI outline. */
+  const [suggesting, setSuggesting] = useState(false);
 
   useEffect(() => {
     fetch("/api/status")
       .then((response) => (response.ok ? response.json() : null))
-      .then((status: StatusResponse | null) => setAi(status))
-      .catch(() => setAi(null));
+      .then((value: StatusResponse | null) => setStatus(value))
+      .catch(() => setStatus(null));
   }, []);
 
-  const { idea, attributes, outline, cells, step } = project;
+  // Writing saved while each branch kept its own copy ("branch/plot point" keys) is folded into
+  // one text per plot point when a project loads. A page already open when that changed still
+  // holds the old copies: fold them now, and rebuild the steps so the editor shows the result.
+  const hasBranchCopies = Object.keys(project.sections).some((key) => key.includes("/"));
+  useEffect(() => {
+    if (!hasBranchCopies) return;
+    const folded = parseProject(project);
+    if (!folded) return;
+    dispatch({ type: "hydrate", project: folded });
+    setStoryKey((key) => key + 1);
+    // Only when old copies turn up.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBranchCopies]);
+
+  const { idea, pacing, guideRail, nodes, step, title } = project;
   const hasIdea = idea.trim().length > 0;
-  const title = outline?.title ?? "";
+  const hasRail = guideRail.length > 0;
+  const hasTree = nodes.length > 0;
 
   const goTo = (next: Step) => dispatch({ type: "setStep", step: next });
 
   const canVisit = (target: Step) => {
     if (target === "idea") return true;
-    if (target === "style") return hasIdea;
-    if (target === "outline") return outline !== null || outlineReq.status !== "idle";
-    return cells.length > 0 || draftReq.status !== "idle";
+    // A story started from scratch has no outline, only an idea.
+    if (target === "tree") return hasRail || hasTree || hasIdea;
+    return hasTree;
   };
 
-  /* ---------- Outline ---------- */
+  // Suggestions are fetched only when the writer asks for them, from the Tree step.
+  const enterTree = () => goTo("tree");
 
-  const generateOutline = async () => {
-    const id = ++latest.current.outline;
-    goTo("outline");
-    setOutlineReq({ status: "loading" });
-    try {
-      const result = await postJSON<OutlineResponse>("/api/outline", { idea, attributes });
-      if (id !== latest.current.outline) return;
-      dispatch({
-        type: "setOutline",
-        outline: {
-          title: result.outline.title,
-          sections: result.outline.sections.map((s) => ({ id: newId(), ...s })),
-        },
-      });
-      setOutlineReq(IDLE);
-    } catch (error) {
-      if (id !== latest.current.outline) return;
-      setOutlineReq({ status: "error", error: errorMessage(error) });
-    }
-  };
-
-  /* ---------- Draft cells ---------- */
-
-  const generateDrafts = async () => {
-    if (!outline) return;
-    const sections = outline.sections
-      .filter((s) => s.heading.trim() || s.intent.trim())
-      .map((s, i) => ({ heading: s.heading.trim() || `Section ${i + 1}`, intent: s.intent.trim() }));
-    if (sections.length === 0) {
-      show("Give at least one section a heading first.", "error");
-      return;
-    }
+  const generateGuideRail = () => {
     if (
-      cells.some((c) => c.text.trim()) &&
-      !window.confirm("Drafting again replaces the cells you have now. Continue?")
+      hasTree &&
+      !window.confirm(
+        "A new outline starts a new tree, so the current tree will be cleared. Anything you have written is kept. Continue?",
+      )
     ) {
       return;
     }
+    void ai.generateGuideRail();
+  };
 
-    const id = ++latest.current.draft;
-    goTo("cells");
-    setDraftReq({ status: "loading" });
-    try {
-      const result = await postJSON<DraftResponse>("/api/draft", {
-        idea,
-        attributes,
-        outline: { title: outline.title, sections },
-      });
-      if (id !== latest.current.draft) return;
-      dispatch({
-        type: "setCells",
-        cells: result.paragraphs.map((text, i) => ({
-          id: newId(),
-          heading: sections[i]?.heading ?? "",
-          text,
-          history: [],
-        })),
-      });
-      setDraftReq(IDLE);
-    } catch (error) {
-      if (id !== latest.current.draft) return;
-      setDraftReq({ status: "error", error: errorMessage(error) });
+  /** Go straight to the tree with no outline: the story grows one beat at a time, with no set length. */
+  const startFromScratch = () => {
+    if (hasRail) {
+      if (
+        !window.confirm(
+          "Start from scratch without the suggested outline? Plot points you have chosen are kept, and the story map stops expecting a set number of beats.",
+        )
+      ) {
+        return;
+      }
+      dispatch({ type: "clearOutline" });
     }
+    setSuggesting(false);
+    enterTree();
   };
 
-  /* ---------- Rabbit hole ---------- */
+  // The pacing and the outline only appear once the writer asks for a suggestion.
+  const showSuggest = suggesting || hasRail || ai.guideReq.status !== "idle";
 
-  const rabbitIndex = cells.findIndex((c) => c.id === rabbitCellId);
-  const rabbitCell = rabbitIndex === -1 ? null : cells[rabbitIndex];
-
-  const loadAlternatives = async (cellId: string, avoid: string[]) => {
-    const index = cells.findIndex((c) => c.id === cellId);
-    const cell = cells[index];
-    if (!cell) return;
-    const id = ++latest.current.rabbit;
-    setRabbit({ status: "loading", alternatives: [] });
-    try {
-      const result = await postJSON<AlternativesResponse>("/api/alternatives", {
-        paragraph: cell.text,
-        context: {
-          idea: idea.slice(0, 8000),
-          title: title.slice(0, 200),
-          heading: cell.heading.slice(0, 200),
-          before: (cells[index - 1]?.text ?? "").slice(0, 6000),
-          after: (cells[index + 1]?.text ?? "").slice(0, 6000),
-        },
-        attributes,
-        n: ALTERNATIVES_PER_ROUND,
-        avoid: avoid.slice(-8),
-      });
-      if (id !== latest.current.rabbit) return;
-      setRabbit({ status: "idle", alternatives: result.alternatives });
-    } catch (error) {
-      if (id !== latest.current.rabbit) return;
-      setRabbit({ status: "error", alternatives: [], error: errorMessage(error) });
-    }
-  };
-
-  const openRabbitHole = (cellId: string) => {
-    setRabbitCellId(cellId);
-    void loadAlternatives(cellId, []);
-  };
-
-  const closeRabbitHole = () => {
-    latest.current.rabbit++;
-    setRabbitCellId(null);
-    setRabbit(RABBIT_IDLE);
-  };
-
-  /* ---------- Cells ---------- */
-
-  const blankCell = () => ({ id: newId(), heading: "", text: "", history: [] });
-
-  const deleteCell = (id: string) => {
-    const cell = cells.find((c) => c.id === id);
-    if (cell?.text.trim() && !window.confirm("Delete this cell and its text?")) return;
-    dispatch({ type: "deleteCell", id });
-  };
-
-  const duplicateCell = (id: string) => {
-    const cell = cells.find((c) => c.id === id);
-    if (!cell) return;
-    dispatch({ type: "insertCell", afterId: id, cell: { ...cell, id: newId(), history: [] } });
-  };
-
-  const startOver = () => {
-    const hasWork = hasIdea || outline !== null || cells.length > 0;
-    if (hasWork && !window.confirm("Start a new project? This clears the current one.")) return;
-    latest.current.outline++;
-    latest.current.draft++;
-    setOutlineReq(IDLE);
-    setDraftReq(IDLE);
-    dispatch({ type: "reset" });
+  /** Put another project on screen. The one being left stays in the library. */
+  const openProject = (next: Project) => {
+    // An untouched project is not worth keeping in the list.
+    if (!hasWork(project)) deleteProject(project.id);
+    ai.reset();
+    dispatch({ type: "hydrate", project: next });
+    setSuggesting(false);
+    setStoryKey((key) => key + 1);
   };
 
   return (
     <div className="app">
       <header className="topbar">
         <div className="brand">
-          <span className="brand-mark" aria-hidden>
-            ~/
-          </span>
-          wandering
+          <Rabbit size={20} aria-hidden />
+          Wandering
         </div>
-        <Stepper current={step} canVisit={canVisit} onVisit={goTo} />
+        <Stepper
+          current={step}
+          canVisit={canVisit}
+          onVisit={(target) => (target === "tree" ? enterTree() : goTo(target))}
+        />
         <div className="topbar-actions">
-          <AiChip status={ai} />
-          <CreditsConcept />
-          <button type="button" className="btn btn-quiet" onClick={startOver}>
-            <FilePlus2 size={14} aria-hidden /> New
-          </button>
+          <ProjectMenu
+            project={project}
+            onOpen={openProject}
+            onNew={() => openProject(emptyProject())}
+            onRename={(value) => dispatch({ type: "setTitle", title: value })}
+          />
+          <AccountConcept />
         </div>
       </header>
 
-      {ai && !ai.configured && (
+      {status && !status.configured && (
         <p className="notice notice-error">
-          No AI provider is configured, so generating won&apos;t work yet. Copy{" "}
-          <code>.env.example</code> to <code>.env.local</code>, set <code>AI_API_KEY</code> and{" "}
-          <code>AI_MODEL</code>, then restart the server.
+          Story suggestions aren&apos;t set up yet, so the outline and plot suggestions won&apos;t work.
+          {/* Setup steps are for whoever runs the server, so only the dev server shows them. */}
+          {process.env.NODE_ENV === "development" && (
+            <>
+              {" "}
+              Copy <code>.env.example</code> to <code>.env.local</code>, set <code>AI_API_KEY</code> and{" "}
+              <code>AI_MODEL</code>, then restart the server.
+            </>
+          )}
         </p>
       )}
-      {ai?.provider === "mock" && (
+      {status?.provider === "mock" && (
         <p className="notice">
-          Mock AI is on: outlines, drafts and alternatives are canned placeholder text. Set a real
-          provider in <code>.env.local</code> to get actual writing.
+          Practice mode: the outline and plot suggestions are placeholders, not ideas about your story.
+          {process.env.NODE_ENV === "development" && (
+            <>
+              {" "}
+              Set a real provider in <code>.env.local</code> for real suggestions.
+            </>
+          )}
         </p>
       )}
       {saveFailed && (
         <p className="notice notice-error">
-          This browser is blocking local storage, so your work won&apos;t survive a reload.
+          This browser is blocking storage, so your work won&apos;t survive a reload. Use Projects to download a copy
+          before you leave.
         </p>
       )}
 
       {!hydrated ? (
         <main className="main" aria-busy="true" />
       ) : (
-        <main className={`main main-${step}`}>
+        <main key={storyKey} className={`main main-${step}`}>
           {step === "idea" && (
             <>
               <StepHeader
-                number="01"
-                name="idea"
-                title="What's on your mind?"
-                sub="Type or dictate a rough idea. It doesn't need to be tidy; the outline comes next."
+                suit="♦"
+                name="Step one"
+                title="What's the story?"
+                sub="Type or dictate the idea, however rough. Then build the plot yourself from scratch, or let the AI suggest a pacing and an outline to build on."
               />
               <IdeaInput value={idea} onChange={(value) => dispatch({ type: "setIdea", idea: value })} />
-              <div className="step-nav">
-                <span />
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={!hasIdea}
-                  onClick={() => goTo("style")}
-                >
-                  Set the style <ArrowRight size={15} aria-hidden />
-                </button>
-              </div>
-            </>
-          )}
 
-          {step === "style" && (
-            <>
-              <StepHeader
-                number="02"
-                name="style"
-                title="How should it sound?"
-                sub="Drag the corners of the shape, or set exact values. Every draft and rewrite follows these."
-              />
-              <StylePanel
-                attributes={attributes}
-                onChange={(id, value) => dispatch({ type: "setAttribute", id, value })}
-                onReset={() => dispatch({ type: "resetAttributes" })}
-              />
-              <div className="step-nav">
-                <button type="button" className="btn btn-quiet" onClick={() => goTo("idea")}>
-                  <ArrowLeft size={15} aria-hidden /> Idea
-                </button>
-                <div className="step-nav-group">
-                  {outline && (
-                    <button type="button" className="btn" onClick={() => goTo("outline")}>
-                      Keep current outline
-                    </button>
-                  )}
+              {!showSuggest && (
+                <div className="start-choice">
+                  <button type="button" className="btn" disabled={!hasIdea} onClick={startFromScratch}>
+                    {hasTree ? (
+                      <>
+                        Back to the tree <ArrowRight size={15} aria-hidden />
+                      </>
+                    ) : (
+                      <>
+                        <PenLine size={15} aria-hidden /> Start from scratch
+                      </>
+                    )}
+                  </button>
                   <button
                     type="button"
-                    className="btn btn-primary"
-                    disabled={!hasIdea || outlineReq.status === "loading"}
-                    onClick={generateOutline}
+                    className="btn btn-suggest"
+                    disabled={!hasIdea}
+                    onClick={() => setSuggesting(true)}
                   >
-                    {outline ? "Regenerate outline" : "Generate outline"}{" "}
-                    <ArrowRight size={15} aria-hidden />
+                    Suggest <Sparkles size={15} aria-label="with AI" />
                   </button>
+                  <p className="hint">
+                    {hasIdea
+                      ? "Start from scratch to build the plot beat by beat yourself, or let the AI suggest a pacing and an outline first."
+                      : "Write your idea above to begin."}
+                  </p>
                 </div>
-              </div>
-            </>
-          )}
+              )}
 
-          {step === "outline" && (
-            <>
-              <StepHeader
-                number="03"
-                name="outline"
-                title="Shape the outline"
-                sub="Each section becomes one paragraph cell. Rename, reorder, add or remove before drafting."
-              />
-              {outlineReq.status === "loading" && <Loading label="Outlining your idea…" lines={5} />}
-              {outlineReq.status === "error" && (
-                <ErrorNotice
-                  message={outlineReq.error ?? "Could not generate an outline."}
-                  onRetry={generateOutline}
+              {showSuggest && (
+                <PacingSlider
+                  value={pacing}
+                  currentDepth={guideRail.length}
+                  onChange={(value) => dispatch({ type: "setPacing", pacing: value })}
                 />
               )}
-              {outlineReq.status !== "loading" && outline && (
-                <OutlineEditor outline={outline} dispatch={dispatch} />
+
+              {ai.guideReq.status === "loading" && <Loading label="Outlining the story…" lines={5} />}
+              {ai.guideReq.status === "error" && (
+                <ErrorNotice message={ai.guideReq.error ?? "Could not make the outline."} onRetry={generateGuideRail} />
               )}
-              {outlineReq.status === "idle" && !outline && (
-                <p className="empty">No outline yet. Generate one from your idea and style.</p>
-              )}
-              <div className="step-nav">
-                <button type="button" className="btn btn-quiet" onClick={() => goTo("style")}>
-                  <ArrowLeft size={15} aria-hidden /> Style
-                </button>
-                <div className="step-nav-group">
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={!hasIdea || outlineReq.status === "loading"}
-                    onClick={generateOutline}
-                  >
-                    <RotateCw size={14} aria-hidden /> {outline ? "Regenerate" : "Generate outline"}
-                  </button>
-                  {cells.length > 0 && (
-                    <button type="button" className="btn" onClick={() => goTo("cells")}>
-                      Back to cells
-                    </button>
+              {hasRail && ai.guideReq.status !== "loading" && (
+                <section className="panel rail-panel" aria-label="Suggested outline">
+                  <p className="label">Suggested outline · {guideRail.length} beats</p>
+                  <h2>{title || "Untitled"}</h2>
+                  <p className="hint">
+                    A suggested structure for the story, one beat per row of the story map. Make it yours: click a title
+                    or description to rewrite it, and drag a beat by its handle to move it. Plot suggestions follow the
+                    outline as it stands.
+                  </p>
+                  {hasTree && (
+                    <p className="hint">
+                      Plot points you have already chosen stay in their columns; changes here shape what is suggested
+                      next.
+                    </p>
                   )}
-                  <button
-                    type="button"
-                    className="btn btn-primary"
-                    disabled={!outline || outlineReq.status === "loading" || draftReq.status === "loading"}
-                    onClick={generateDrafts}
-                  >
-                    {cells.length > 0 ? "Draft again" : "Draft the cells"}{" "}
-                    <ArrowRight size={15} aria-hidden />
+                  <GuideRail
+                    beats={guideRail}
+                    onChange={(index, patch) => dispatch({ type: "updateBeat", index, patch })}
+                    onMove={(from, to) => dispatch({ type: "moveBeat", from, to })}
+                  />
+                </section>
+              )}
+
+              {showSuggest && (
+                <div className="step-nav">
+                  <button type="button" className="btn btn-quiet" disabled={!hasIdea} onClick={startFromScratch}>
+                    <PenLine size={14} aria-hidden /> Start from scratch instead
                   </button>
+                  <div className="step-nav-group">
+                    <button
+                      type="button"
+                      className={hasRail ? "btn" : "btn btn-primary"}
+                      disabled={!hasIdea || ai.guideReq.status === "loading"}
+                      onClick={generateGuideRail}
+                    >
+                      {hasRail ? <RotateCw size={14} aria-hidden /> : <Sparkles size={15} aria-hidden />}
+                      {hasRail ? "New outline" : "Suggest an outline"}
+                    </button>
+                    {hasRail && (
+                      <button type="button" className="btn btn-primary" onClick={enterTree}>
+                        {hasTree ? "Back to the tree" : "Grow the tree"} <ArrowRight size={15} aria-hidden />
+                      </button>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
             </>
           )}
 
-          {step === "cells" && (
+          {step === "tree" && (
             <>
               <StepHeader
-                number="04"
-                name="cells"
-                title="Work the draft"
-                sub="Edit any paragraph, drag to reorder, or open a rabbit hole to see other ways to say it."
+                suit="♥"
+                name="Step two"
+                title="Down the rabbit hole"
+                sub="Choose what happens next, or write your own. The story map shows the whole tree; click any plot point in it to go there."
               />
-              {draftReq.status === "loading" ? (
-                <Loading label="Drafting a paragraph for each section…" lines={8} />
-              ) : (
-                <>
-                  {draftReq.status === "error" && (
-                    <ErrorNotice
-                      message={draftReq.error ?? "Could not draft the cells."}
-                      onRetry={generateDrafts}
-                    />
-                  )}
-                  <input
-                    className="title-input title-input-doc prose"
-                    value={title}
-                    placeholder="Untitled"
-                    aria-label="Title"
-                    onChange={(event) => dispatch({ type: "setTitle", title: event.target.value })}
-                  />
-                  {cells.length === 0 && draftReq.status === "idle" && (
-                    <p className="empty">No cells yet. Add one, or draft them from the outline.</p>
-                  )}
-                  <CellList
-                    cells={cells}
-                    activeCellId={rabbitCellId}
-                    onMove={(activeId, overId) => dispatch({ type: "moveCell", activeId, overId })}
-                    onText={(id, text) => dispatch({ type: "updateCell", id, patch: { text } })}
-                    onHeading={(id, heading) => dispatch({ type: "updateCell", id, patch: { heading } })}
-                    onRabbitHole={openRabbitHole}
-                    onUndo={(id) => dispatch({ type: "undoCell", id })}
-                    onDuplicate={duplicateCell}
-                    onAddBelow={(id) => dispatch({ type: "insertCell", afterId: id, cell: blankCell() })}
-                    onDelete={deleteCell}
-                  />
-                  <button
-                    type="button"
-                    className="btn btn-quiet add-row"
-                    onClick={() => dispatch({ type: "insertCell", afterId: null, cell: blankCell() })}
-                  >
-                    <Plus size={14} aria-hidden /> Add cell
-                  </button>
-                </>
-              )}
-              <div className="step-nav">
-                <button type="button" className="btn btn-quiet" onClick={() => goTo("outline")}>
-                  <ArrowLeft size={15} aria-hidden /> Outline
-                </button>
-                <ExportButton title={title} cells={cells} onResult={show} />
-              </div>
+              <TreeStep
+                project={project}
+                dispatch={dispatch}
+                ai={ai}
+                onBack={() => goTo("idea")}
+                onWrite={() => goTo("write")}
+              />
+            </>
+          )}
+
+          {step === "write" && (
+            <>
+              <StepHeader
+                suit="♠"
+                name="Step three"
+                title="Write it"
+                sub="Write under each plot point. The document shows one branch of the story at a time; click a plot point in the tree to jump there or switch branch."
+              />
+              <WriteStep
+                project={project}
+                dispatch={dispatch}
+                onToast={show}
+                onBack={() => goTo("tree")}
+                onReview={() => goTo("review")}
+              />
+            </>
+          )}
+
+          {step === "review" && (
+            <>
+              <StepHeader
+                suit="♣"
+                name="Step four"
+                title="Review"
+                sub="The finished text, laid out as one piece. Choose which plot points it tells in the story map, then download it or copy it."
+              />
+              <ReviewStep project={project} dispatch={dispatch} onToast={show} onBack={() => goTo("write")} />
             </>
           )}
         </main>
       )}
-
-      <RabbitHolePanel
-        cell={rabbitCell}
-        cellNumber={rabbitIndex + 1}
-        state={rabbit}
-        onClose={closeRabbitHole}
-        onPick={(text) => {
-          if (!rabbitCell) return;
-          dispatch({ type: "swapCellText", id: rabbitCell.id, text });
-        }}
-        onMore={() => rabbitCell && void loadAlternatives(rabbitCell.id, rabbit.alternatives)}
-        onRestore={(index) => {
-          if (!rabbitCell) return;
-          dispatch({ type: "restoreCell", id: rabbitCell.id, index });
-        }}
-      />
 
       <Toast toast={toast} />
     </div>
   );
 }
 
-function StepHeader(props: { number: string; name: string; title: string; sub: string }) {
+function StepHeader(props: { suit: string; name: string; title: string; sub: string }) {
   return (
     <header className="step-header">
       <p className="label">
-        {props.number} / {props.name}
+        <span className="suit" aria-hidden>
+          {props.suit}
+        </span>{" "}
+        {props.name}
       </p>
       <h1>{props.title}</h1>
       <p className="step-sub">{props.sub}</p>
     </header>
-  );
-}
-
-function AiChip({ status }: { status: StatusResponse | null }) {
-  if (!status) return null;
-  const state = !status.configured ? "off" : status.provider === "mock" ? "mock" : "on";
-  const text = state === "off" ? "not configured" : state === "mock" ? "mock" : status.model;
-  return (
-    <span className={`chip chip-${state}`} title={`AI provider: ${status.provider}`}>
-      <span className="chip-dot" aria-hidden />
-      ai: {text}
-    </span>
   );
 }

@@ -1,137 +1,169 @@
 "use client";
 
+import type { JSONContent } from "@tiptap/core";
 import { useEffect, useReducer, useState } from "react";
-import { clampValue, defaultAttributes } from "./attributes";
 import { emptyProject, loadProject, saveProject } from "./storage";
-import type { Cell, Outline, OutlineSection, Project, Step } from "./types";
+import { branchFor, groupKey, subtreeIds } from "./tree";
+import type { Beat, Candidate, Link, Plot, PlotNode, Project, Step } from "./types";
 
-/** Cap on how many earlier versions a cell remembers. */
-const MAX_HISTORY = 20;
-
-export function newId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
-}
+export { newId } from "./id";
 
 export type Action =
   | { type: "hydrate"; project: Project }
-  | { type: "reset" }
   | { type: "setStep"; step: Step }
   | { type: "setIdea"; idea: string }
-  | { type: "setAttribute"; id: string; value: number }
-  | { type: "resetAttributes" }
-  | { type: "setOutline"; outline: Outline }
+  | { type: "setPacing"; pacing: number }
   | { type: "setTitle"; title: string }
-  | { type: "updateSection"; id: string; patch: Partial<Omit<OutlineSection, "id">> }
-  | { type: "addSection"; section: OutlineSection }
-  | { type: "removeSection"; id: string }
-  | { type: "moveSection"; id: string; direction: -1 | 1 }
-  | { type: "setCells"; cells: Cell[] }
-  | { type: "updateCell"; id: string; patch: Partial<Pick<Cell, "text" | "heading">> }
-  | { type: "insertCell"; cell: Cell; afterId: string | null }
-  | { type: "deleteCell"; id: string }
-  | { type: "moveCell"; activeId: string; overId: string }
-  /** Replace a cell's text, keeping the old text in its history. */
-  | { type: "swapCellText"; id: string; text: string }
-  /** Step back to the most recent history entry. */
-  | { type: "undoCell"; id: string }
-  /** Bring back a specific history entry; the current text takes its place in history. */
-  | { type: "restoreCell"; id: string; index: number };
+  /** A new guide rail starts a new tree: nodes, suggestions, links and the B plot are cleared. */
+  | { type: "setGuideRail"; title: string; beats: Beat[] }
+  /** Drop the outline to build the story from scratch, with no expected number of beats. The tree is kept. */
+  | { type: "clearOutline" }
+  /** The AI-tidied idea for the Plot reminder, and the idea text it was made from. */
+  | { type: "setPlotSummary"; from: string; text: string }
+  /** Rewrite one beat of the outline. The tree is left as it is. */
+  | { type: "updateBeat"; index: number; patch: Partial<Beat> }
+  /** Move a beat to another place in the outline. The tree is left as it is. */
+  | { type: "moveBeat"; from: number; to: number }
+  /** Add suggestions under one parent, keeping any already there. */
+  | { type: "addCandidates"; key: string; candidates: Candidate[] }
+  | { type: "addNode"; node: PlotNode }
+  | { type: "updateNode"; id: string; patch: Partial<Pick<PlotNode, "title" | "summary" | "isEnding">> }
+  /** Delete a node and everything below it. */
+  | { type: "pruneNode"; id: string }
+  | { type: "startBPlot"; premise: string }
+  | { type: "setBPremise"; premise: string }
+  /** Remove the B plot with its nodes, suggestions and links. */
+  | { type: "removeBPlot" }
+  | { type: "addLink"; link: Link }
+  | { type: "removeLink"; link: Link }
+  | { type: "setActiveLeaf"; plot: Plot; id: string | null }
+  /**
+   * Save what the editor holds. `owned` are the section keys the editor was
+   * showing: they are replaced by `sections` (an owned key that is absent has
+   * lost its heading). All other writing, including other branches', is kept.
+   */
+  | {
+      type: "saveWriting";
+      /** The project the editor was showing; a save that arrives after another was opened is dropped. */
+      projectId: string;
+      owned: string[];
+      intro: JSONContent[];
+      sections: Record<string, JSONContent[]>;
+    };
 
-function mapCell(project: Project, id: string, fn: (cell: Cell) => Cell): Project {
-  return { ...project, cells: project.cells.map((c) => (c.id === id ? fn(c) : c)) };
-}
-
-function mapSections(project: Project, fn: (sections: OutlineSection[]) => OutlineSection[]): Project {
-  if (!project.outline) return project;
-  return { ...project, outline: { ...project.outline, sections: fn(project.outline.sections) } };
-}
-
-function move<T>(items: T[], from: number, to: number): T[] {
-  if (from < 0 || to < 0 || from >= items.length || to >= items.length || from === to) return items;
-  const next = items.slice();
-  const [item] = next.splice(from, 1);
-  next.splice(to, 0, item);
-  return next;
+function withoutNodes(project: Project, removed: Set<string>): Project {
+  const candidates = { ...project.candidates };
+  for (const node of project.nodes) {
+    if (removed.has(node.id)) delete candidates[groupKey(node.plot, node.id)];
+  }
+  const activeLeaf = { ...project.activeLeaf };
+  for (const plot of ["main", "b"] as const) {
+    if (activeLeaf[plot] && removed.has(activeLeaf[plot])) activeLeaf[plot] = null;
+  }
+  return {
+    ...project,
+    nodes: project.nodes.filter((n) => !removed.has(n.id)),
+    candidates,
+    links: project.links.filter((l) => !removed.has(l.mainId) && !removed.has(l.bId)),
+    activeLeaf,
+  };
 }
 
 export function reducer(project: Project, action: Action): Project {
   switch (action.type) {
     case "hydrate":
       return action.project;
-    case "reset":
-      return emptyProject();
     case "setStep":
       return { ...project, step: action.step };
     case "setIdea":
       return { ...project, idea: action.idea };
-    case "setAttribute":
+    case "setPacing":
+      return { ...project, pacing: Math.max(0, Math.min(100, Math.round(action.pacing))) };
+    case "setTitle":
+      return { ...project, title: action.title };
+    case "setGuideRail":
       return {
         ...project,
-        attributes: project.attributes.map((a) =>
-          a.id === action.id ? { ...a, value: clampValue(action.value) } : a,
+        title: action.title,
+        guideRail: action.beats,
+        nodes: [],
+        candidates: {},
+        links: [],
+        bPlot: null,
+        activeLeaf: { main: null, b: null },
+      };
+    case "clearOutline":
+      return { ...project, guideRail: [] };
+    case "setPlotSummary":
+      return { ...project, plotSummary: { from: action.from, text: action.text } };
+    case "updateBeat":
+      return {
+        ...project,
+        guideRail: project.guideRail.map((beat, i) => (i === action.index ? { ...beat, ...action.patch } : beat)),
+      };
+    case "moveBeat": {
+      const { from, to } = action;
+      const last = project.guideRail.length - 1;
+      if (from === to || from < 0 || to < 0 || from > last || to > last) return project;
+      const guideRail = project.guideRail.slice();
+      const [moved] = guideRail.splice(from, 1);
+      guideRail.splice(to, 0, moved);
+      return { ...project, guideRail };
+    }
+    case "addCandidates": {
+      const existing = project.candidates[action.key] ?? [];
+      return {
+        ...project,
+        candidates: { ...project.candidates, [action.key]: [...existing, ...action.candidates] },
+      };
+    }
+    case "addNode":
+      if (project.nodes.some((n) => n.id === action.node.id)) return project;
+      return {
+        ...project,
+        nodes: [
+          ...project.nodes,
+          { ...action.node, branch: branchFor(project.nodes, action.node.parentId, action.node.id) },
+        ],
+      };
+    case "updateNode":
+      return {
+        ...project,
+        nodes: project.nodes.map((n) => (n.id === action.id ? { ...n, ...action.patch } : n)),
+      };
+    case "pruneNode":
+      return withoutNodes(project, new Set(subtreeIds(project.nodes, action.id)));
+    case "startBPlot":
+      return { ...project, bPlot: { premise: action.premise } };
+    case "setBPremise":
+      return project.bPlot ? { ...project, bPlot: { premise: action.premise } } : project;
+    case "removeBPlot": {
+      const removed = new Set(project.nodes.filter((n) => n.plot === "b").map((n) => n.id));
+      const next = withoutNodes(project, removed);
+      const candidates = { ...next.candidates };
+      delete candidates[groupKey("b", null)];
+      return { ...next, candidates, bPlot: null };
+    }
+    case "addLink":
+      if (project.links.some((l) => l.mainId === action.link.mainId && l.bId === action.link.bId)) {
+        return project;
+      }
+      return { ...project, links: [...project.links, action.link] };
+    case "removeLink":
+      return {
+        ...project,
+        links: project.links.filter(
+          (l) => !(l.mainId === action.link.mainId && l.bId === action.link.bId),
         ),
       };
-    case "resetAttributes":
-      return { ...project, attributes: defaultAttributes() };
-    case "setOutline":
-      return { ...project, outline: action.outline };
-    case "setTitle":
-      return {
-        ...project,
-        outline: { sections: [], ...project.outline, title: action.title },
-      };
-    case "updateSection":
-      return mapSections(project, (sections) =>
-        sections.map((s) => (s.id === action.id ? { ...s, ...action.patch } : s)),
-      );
-    case "addSection":
-      return mapSections(project, (sections) => [...sections, action.section]);
-    case "removeSection":
-      return mapSections(project, (sections) => sections.filter((s) => s.id !== action.id));
-    case "moveSection":
-      return mapSections(project, (sections) => {
-        const from = sections.findIndex((s) => s.id === action.id);
-        return move(sections, from, from + action.direction);
-      });
-    case "setCells":
-      return { ...project, cells: action.cells };
-    case "updateCell":
-      return mapCell(project, action.id, (c) => ({ ...c, ...action.patch }));
-    case "insertCell": {
-      const index = action.afterId ? project.cells.findIndex((c) => c.id === action.afterId) : -1;
-      const cells = project.cells.slice();
-      cells.splice(index === -1 ? cells.length : index + 1, 0, action.cell);
-      return { ...project, cells };
+    case "setActiveLeaf":
+      return { ...project, activeLeaf: { ...project.activeLeaf, [action.plot]: action.id } };
+    case "saveWriting": {
+      if (action.projectId !== project.id) return project;
+      const owned = new Set(action.owned);
+      const kept = Object.fromEntries(Object.entries(project.sections).filter(([id]) => !owned.has(id)));
+      return { ...project, intro: action.intro, sections: { ...kept, ...action.sections } };
     }
-    case "deleteCell":
-      return { ...project, cells: project.cells.filter((c) => c.id !== action.id) };
-    case "moveCell": {
-      const from = project.cells.findIndex((c) => c.id === action.activeId);
-      const to = project.cells.findIndex((c) => c.id === action.overId);
-      return { ...project, cells: move(project.cells, from, to) };
-    }
-    case "swapCellText":
-      return mapCell(project, action.id, (c) =>
-        c.text === action.text
-          ? c
-          : { ...c, text: action.text, history: [...c.history, c.text].slice(-MAX_HISTORY) },
-      );
-    case "undoCell":
-      return mapCell(project, action.id, (c) =>
-        c.history.length === 0
-          ? c
-          : { ...c, text: c.history[c.history.length - 1], history: c.history.slice(0, -1) },
-      );
-    case "restoreCell":
-      return mapCell(project, action.id, (c) => {
-        const restored = c.history[action.index];
-        if (restored === undefined) return c;
-        const history = c.history.filter((_, i) => i !== action.index);
-        return { ...c, text: restored, history: [...history, c.text].slice(-MAX_HISTORY) };
-      });
   }
 }
 
