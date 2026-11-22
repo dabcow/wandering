@@ -56,7 +56,7 @@ npx wrangler secret put AI_API_KEY
 
 (or in the dashboard: Workers & Pages → wandering → Settings → Variables and Secrets → add `AI_API_KEY` as a **Secret**). Running the command again replaces it straight away, with no rebuild; `npx wrangler secret delete AI_API_KEY` removes it.
 
-**Deploying from this machine:** `npm run deploy` builds the Worker and uploads it. OpenNext copies the values in local .env files, `.env.local` included, into the Worker's code. So keep the key in `.env.development.local`, which `npm run dev` reads and production builds don't. `scripts/check-worker-secrets.mjs` stops a deploy whose bundle carries the key.
+**Deploying from this machine:** `npm run deploy` builds the Worker and uploads it. OpenNext copies the values in every local .env file into the Worker's code, one set per mode. Keep the key in `.env.development.local`, which `npm run dev` reads. Before uploading, `scripts/check-worker-secrets.mjs` empties the development and test sets (the Worker only uses the production one) and stops the deploy if the key is still in the bundle, for example because it is in `.env.local`.
 
 **Deploying from GitHub (Workers Builds):** set the build command to `npx opennextjs-cloudflare build` and the deploy command to `npx opennextjs-cloudflare deploy`. The repo has no .env files with keys, so the key comes only from the secret.
 
