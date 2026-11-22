@@ -1,5 +1,7 @@
 # Wandering
 
+**Live demo: [wandering.cactislove.workers.dev](https://wandering.cactislove.workers.dev)**, running on Cloudflare Workers (see [Deploy to Cloudflare](#deploy-to-cloudflare)). Projects are kept in your browser only; use Projects → download to keep a copy.
+
 A plot-tree tool for creative writers. Enter a story idea and a pacing, get an outline of the arc, then branch through plot points beat by beat until you have a tree-shaped skeleton of the story, with an optional subplot in its own lane. Then write in a document beside the tree, under a heading for each plot point.
 
 The AI proposes structure only: the outline, plot-point options, and a subplot premise. It never writes prose.
