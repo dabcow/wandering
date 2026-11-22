@@ -13,6 +13,7 @@ import {
 import type { Beat, Candidate, Plot, PlotNode } from "@/lib/types";
 import type { Req } from "@/lib/useStoryAI";
 import { OwnCard, type OwnPlotPoint } from "./OwnCard";
+import { CheshireLoader } from "./CheshireLoader";
 import { ErrorNotice } from "./Status";
 
 type Props = {
@@ -323,14 +324,15 @@ export function PlotPointView(props: Props) {
                   onRemove={() => props.onRemove(child.id)}
                 />
               ))}
-              {req.status === "loading" &&
-                Array.from({ length: 3 }, (_, i) => <div key={i} className="option option-ghost" aria-hidden />)}
             </div>
 
             {req.status === "loading" && (
-              <p className="hint" role="status">
-                <span className="spinner" aria-hidden /> Thinking of where this could go…
-              </p>
+              <div className="suggest-loading">
+                <CheshireLoader />
+                <p className="hint" role="status">
+                  <span className="spinner" aria-hidden /> Thinking of where this could go…
+                </p>
+              </div>
             )}
             {req.status === "error" && (
               <ErrorNotice

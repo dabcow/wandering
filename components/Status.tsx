@@ -1,17 +1,14 @@
 import { RotateCw, TriangleAlert } from "lucide-react";
+import { CheshireLoader } from "./CheshireLoader";
 
-/** Placeholder shown while the model is working. */
-export function Loading({ label, lines = 4 }: { label: string; lines?: number }) {
+/** Shown while the model is working: the Cheshire cat wanders by while it thinks. */
+export function Loading({ label }: { label: string }) {
   return (
     <div className="loading" role="status" aria-live="polite">
       <p className="loading-label">
         <span className="spinner" aria-hidden /> {label}
       </p>
-      <div aria-hidden>
-        {Array.from({ length: lines }, (_, i) => (
-          <div key={i} className="skeleton" style={{ width: `${92 - ((i * 17) % 40)}%` }} />
-        ))}
-      </div>
+      <CheshireLoader />
     </div>
   );
 }

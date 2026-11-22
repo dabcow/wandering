@@ -213,7 +213,7 @@ export default function Home() {
                 />
               )}
 
-              {ai.guideReq.status === "loading" && <Loading label="Outlining the story…" lines={5} />}
+              {ai.guideReq.status === "loading" && <Loading label="Outlining the story…" />}
               {ai.guideReq.status === "error" && (
                 <ErrorNotice message={ai.guideReq.error ?? "Could not make the outline."} onRetry={generateGuideRail} />
               )}

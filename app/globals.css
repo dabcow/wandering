@@ -2517,3 +2517,157 @@ html:has(dialog[open]) {
   letter-spacing: 0.4em;
   text-align: center;
 }
+
+/* ---------- Cheshire cat loader ---------- */
+
+/* A light pencil sketch: grey lines, no fills. */
+.cheshire {
+  display: block;
+  width: 100%;
+  max-width: 440px;
+  height: auto;
+  margin: 4px auto 0;
+  overflow: visible;
+}
+
+.cheshire path {
+  fill: none;
+  stroke: #bdb6cc;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.cheshire .sk-faint {
+  stroke: #d6d0e2;
+  stroke-width: 1.3;
+}
+
+/* Where the cat stands when it isn't walking (reduced motion). */
+.cheshire .cat-walk {
+  transform: translateX(150px);
+  animation: cat-walk 10s linear infinite;
+}
+
+.cheshire .cat-bob {
+  animation: cat-bob 0.5s ease-in-out infinite alternate;
+}
+
+.cheshire .cat-body {
+  animation: cat-vanish 10s linear infinite;
+}
+
+.cheshire .cat-grin {
+  animation: cat-grin 10s linear infinite;
+}
+
+.cheshire .cat-legs-a path,
+.cheshire .cat-legs-b path {
+  transform-box: fill-box;
+  transform-origin: 50% 0%;
+  animation: cat-step 0.5s ease-in-out infinite alternate;
+}
+
+.cheshire .cat-legs-b path {
+  animation-direction: alternate-reverse;
+}
+
+.cheshire .cat-tail {
+  transform-box: fill-box;
+  transform-origin: 100% 100%;
+  animation: cat-tail 1.6s ease-in-out infinite alternate;
+}
+
+/* Strolls in from the left and stops by the signpost... */
+@keyframes cat-walk {
+  0% {
+    transform: translateX(-70px);
+  }
+  55%,
+  100% {
+    transform: translateX(240px);
+  }
+}
+
+/* ...where it fades away... */
+@keyframes cat-vanish {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  58% {
+    opacity: 1;
+  }
+  70%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ...until only the grin is left. */
+@keyframes cat-grin {
+  0% {
+    opacity: 0;
+  }
+  6%,
+  80% {
+    opacity: 1;
+  }
+  92%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes cat-bob {
+  to {
+    transform: translateY(-1.5px);
+  }
+}
+
+@keyframes cat-step {
+  from {
+    transform: rotate(-16deg);
+  }
+  to {
+    transform: rotate(16deg);
+  }
+}
+
+@keyframes cat-tail {
+  from {
+    transform: rotate(-6deg);
+  }
+  to {
+    transform: rotate(8deg);
+  }
+}
+
+/* With reduced motion the cat simply sits in view, grin and all. */
+@media (prefers-reduced-motion: reduce) {
+  .cheshire .cat-walk,
+  .cheshire .cat-bob,
+  .cheshire .cat-body,
+  .cheshire .cat-grin,
+  .cheshire .cat-legs-a path,
+  .cheshire .cat-legs-b path,
+  .cheshire .cat-tail {
+    animation: none !important;
+  }
+
+  .cheshire .cat-body,
+  .cheshire .cat-grin {
+    opacity: 1;
+  }
+}
+
+/* Step 2: the cat wanders where the suggestions will appear. */
+/* Full width of the panel, so the stroll has room; the drawing itself stops at 440px. */
+.suggest-loading {
+  width: 100%;
+  justify-self: stretch;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 6px 0 2px;
+}
