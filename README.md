@@ -44,6 +44,24 @@ Settings live in `.env.local` (see `.env.example`). The key stays on the server.
 
 `openrouter` uses OpenRouter's endpoint. `openai-compatible` talks to any other Chat Completions-style endpoint and defaults to `https://api.openai.com/v1`. `mock` returns canned text so the interface can be tried without a key.
 
+## Deploy to Cloudflare
+
+Wandering runs on Cloudflare Workers through the OpenNext adapter (`@opennextjs/cloudflare`). Its API routes need a server, so a static export won't work. `wrangler.jsonc` holds the Worker's settings (name `wandering`, which must match the Worker's name in the Cloudflare dashboard) and the AI settings that aren't secret. `open-next.config.ts` holds the adapter's settings.
+
+**The AI key is a Cloudflare secret, never a file in the repo:**
+
+```
+npx wrangler secret put AI_API_KEY
+```
+
+(or in the dashboard: Workers & Pages → wandering → Settings → Variables and Secrets → add `AI_API_KEY` as a **Secret**). Running the command again replaces it straight away, with no rebuild; `npx wrangler secret delete AI_API_KEY` removes it.
+
+**Deploying from this machine:** `npm run deploy` builds the Worker and uploads it. OpenNext copies the values in local .env files, `.env.local` included, into the Worker's code. So keep the key in `.env.development.local`, which `npm run dev` reads and production builds don't. `scripts/check-worker-secrets.mjs` stops a deploy whose bundle carries the key.
+
+**Deploying from GitHub (Workers Builds):** set the build command to `npx opennextjs-cloudflare build` and the deploy command to `npx opennextjs-cloudflare deploy`. The repo has no .env files with keys, so the key comes only from the secret.
+
+`npm run preview` runs the built Worker locally in Cloudflare's runtime at http://localhost:8787, reading its key from `.dev.vars` (see `.dev.vars.example`).
+
 ## Where things are
 
 - `app/page.tsx`: the stepper and step 1

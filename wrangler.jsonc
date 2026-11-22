@@ -1,0 +1,25 @@
+// Cloudflare Workers deployment, built by OpenNext (`npm run deploy`).
+// The AI key is NOT here: add it as a secret with `npx wrangler secret put AI_API_KEY`
+// (or in the dashboard as an encrypted Secret). For `npm run preview`, put it in .dev.vars.
+{
+	"$schema": "node_modules/wrangler/config-schema.json",
+	// Must match the Worker's name in the Cloudflare dashboard.
+	"name": "wandering",
+	"main": ".open-next/worker.js",
+	"compatibility_date": "2026-11-19",
+	"compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+	"assets": {
+		"directory": ".open-next/assets",
+		"binding": "ASSETS"
+	},
+	// Not secret, so kept here. A deploy sets these, replacing any edited in the dashboard.
+	"vars": {
+		"AI_PROVIDER": "openrouter",
+		"AI_MODEL": "openai/gpt-6-luna",
+		"AI_REASONING_EFFORT": "low"
+	},
+	// Keeps the Worker's logs, where the AI routes record why a request failed ("[ai] ...").
+	"observability": {
+		"enabled": true
+	}
+}

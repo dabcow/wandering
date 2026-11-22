@@ -1,0 +1,4 @@
+# Copy to .dev.vars for `npm run preview` (the app running in Cloudflare's local runtime).
+# .dev.vars is git-ignored. On Cloudflare itself, set the key as a secret instead:
+#   npx wrangler secret put AI_API_KEY
+AI_API_KEY=
